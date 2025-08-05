@@ -234,17 +234,11 @@ def generate_historical_plots(df, date_string, user_province):
     """
     try:
         # --- DATA CLEANING AND CONVERSION ---
-        # The provided df_input.info() shows several columns as 'object' or 'float'
-        # which need to be converted to integer for filtering and grouping.
+        user_province = user_province.lower()
+       
         df['weekday'] = pd.to_numeric(df['weekday'], errors='coerce').astype('Int64')
         df['hour'] = pd.to_numeric(df['hour'], errors='coerce').astype('Int64')
         df['calendar_week'] = pd.to_numeric(df['calendar_week'], errors='coerce').astype('Int64')
-
-        # Create a federal wind utilization rate if it doesn't exist, as suggested by the new df.info().
-        if 'area_federal_wind_utilization_rate' not in df.columns and \
-           'area_federal_wind_production' in df.columns and \
-           'area_federal_wind_capacity' in df.columns:
-            df['area_federal_wind_utilization_rate'] = df['area_federal_wind_production'] / df['area_federal_wind_capacity']
         
         # 1. Extract weekday and calendar week from the user-provided date
         date_obj = datetime.strptime(date_string, '%d-%m-%Y')
@@ -262,7 +256,7 @@ def generate_historical_plots(df, date_string, user_province):
             print("No historical data found for the specified weekday and calendar week.")
             return
 
-        # Define province-to-region mapping for PV production
+        # Define province-to-region mapping for wind production
         pv_flanders_provinces = ['antwerp', 'eastflanders', 'flemishbrabant', 'limburg', 'westflanders']
         pv_wallonia_provinces = ['hainaut', 'liège', 'luxembourg', 'namur', 'walloonbrabant']
         pv_brussels_provinces = ['brussels']
@@ -274,11 +268,11 @@ def generate_historical_plots(df, date_string, user_province):
         elif user_province in pv_wallonia_provinces:
             user_region_wind_col = 'area_wallonia_wind_utilization_rate'
         elif user_province in pv_brussels_provinces:
-            # Brussels doesn't have a regional wind rate, so we'll use the federal one
-            user_region_wind_col = 'area_federal_wind_utilization_rate'
+            # Brussels doesn't have a regional wind rate, so we'll use the flanders one
+            user_region_wind_col = 'area_flanders_wind_utilization_rate'
         else:
-            print(f"Warning: Province '{user_province}' not recognized. Defaulting to federal wind data.")
-            user_region_wind_col = 'area_federal_wind_utilization_rate'
+            print(f"Warning: Province '{user_province}' not recognized. Defaulting to flanders wind data.")
+            user_region_wind_col = 'area_flanders_wind_utilization_rate'
 
         # Get the PV column name for the user's province
         user_pv_col_name = f'area_{user_province}_pv_utilization_rate'
@@ -304,17 +298,19 @@ def generate_historical_plots(df, date_string, user_province):
         
         plt.style.use('seaborn-v0_8-whitegrid')
         plt.figure(figsize=(12, 6))
-        plt.plot(df_total_renewable['hour'], df_total_renewable['mean_utilization'], marker='o', color='green', label=f'Average Renewable Utilization ({user_province})')
+        plt.plot(df_total_renewable['hour'], df_total_renewable['mean_utilization'], marker='o', color='green', label=f'Average Renewable Generation (Wind and Solar - {user_province.capitalize()})')
         plt.fill_between(df_total_renewable['hour'],
                          df_total_renewable['mean_utilization'] - df_total_renewable['std_utilization'],
                          df_total_renewable['mean_utilization'] + df_total_renewable['std_utilization'],
                          color='green', alpha=0.2, label='Standard Deviation')
-        plt.title(f'Historical Renewable Energy Utilization Profile (Week {target_calendar_week}, {target_weekday_name})', fontsize=16)
+        plt.title(f'Historical Renewable Energy Generation Rate (Wind and Solar - historical days similar to {date_string} in {user_province.capitalize()})', fontsize=16)
         plt.xlabel('Hour of the Day', fontsize=12)
-        plt.ylabel('Average Total Utilization Rate', fontsize=12)
+        plt.ylabel('Average Total Generation Rate', fontsize=12)
         plt.xticks(df_total_renewable['hour'])
         plt.legend()
         plt.tight_layout()
+        plt.figtext(0.1, 0.005,
+            "Note: The Generation Rate is the ratio between the measured Wind & Solar energy generation and the respective estimated total capacity.", ha='left', fontsize=7, color='gray')
         plt.show()
 
         # 4. Plot 2: Historical Electricity Price Distribution
@@ -334,9 +330,9 @@ def generate_historical_plots(df, date_string, user_province):
         x_pos = list(hourly_medians.index).index(best_hour)
         plt.axvspan(x_pos - 0.5, x_pos + 0.5, color='green', alpha=0.3, label=f'Historically Cheapest Hour ({best_hour}h)')
 
-        plt.title(f'Electricity Price Distribution by Hour (Week {target_calendar_week}, {target_weekday_name})', fontsize=16)
+        plt.title(f'Electricity Price (€/MWh) Distribution by Hour (historical days similar to {date_string} in {user_province.capitalize()})', fontsize=16)
         plt.xlabel('Hour of the Day', fontsize=12)
-        plt.ylabel('Market Price (€)', fontsize=12)
+        plt.ylabel('Market Price (€/MWh)', fontsize=12)
         plt.legend()
         plt.tight_layout()
         plt.show()
@@ -346,6 +342,4 @@ def generate_historical_plots(df, date_string, user_province):
         
 # Example usage of the function with a user-provided date and province
 # You would get the date and province from user input in the final web interface.
-generate_historical_plots(df_input, '05-08-2025', 'namur')
-
-df_input.info()
+generate_historical_plots(df_input, '05-08-2025', 'Namur')
