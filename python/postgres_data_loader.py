@@ -21,9 +21,9 @@ db_params = {
 }
 
 
-#######################################################################
-### 1. Connect to PostgreSQL DB and Load master data into DataFrame ###
-#######################################################################
+#############################################################################
+### 1. Connect to PostgreSQL Database and Load master data into DataFrame ###
+#############################################################################
 
 
 # SQL query to select all columns from master_data

@@ -23,6 +23,8 @@ SELECT
     TO_CHAR("DateTime"::timestamp, 'HH24') AS hour,
     TO_CHAR("DateTime"::timestamp, 'WW') AS calendar_week,
 
+    AVG("System imbalance") AS avg_systemimbalance,  -- Imbalance itself as observed
+    AVG("Net regulation volume") AS avg_netregulationvolume, -- Transmission System Operator reaction to the observed imbalance
     AVG("Positive imbalance price") AS avg_positive_price,
     AVG("Negative imbalance price") AS avg_negative_price
 FROM 
@@ -293,9 +295,10 @@ SELECT
     w.avg_wind_monitored_capacity_flanders AS Area_Flanders_wind_capacity,
     w.avg_wind_monitored_capacity_wallonia AS Area_Wallonia_wind_capacity,
     t.avg_load,
+    i.avg_systemimbalance,
+    i.avg_netregulationvolume,
     i.avg_positive_price,
-    i.avg_negative_price,
-    (300 - i.avg_negative_price) / 300 * 100 AS relative_savings_percent
+    i.avg_negative_price
 FROM pv_production_clean p
 LEFT JOIN wind_production_clean w 
     ON p.timestamp = w.timestamp
@@ -303,33 +306,3 @@ LEFT JOIN total_load_clean t
     ON p.timestamp = t.timestamp
 LEFT JOIN imbalance_price_clean i 
     ON p.timestamp = i.timestamp;
-
-
-
--- ------------------------
--- 6. Region Mapping     --
--- ------------------------
-
--- Create a region_mapping table to simplify region selection in the UI.
-DROP TABLE IF EXISTS region_mapping;
-
-CREATE TABLE region_mapping (
-    region_code TEXT,
-    region_name TEXT
-);
-
-INSERT INTO region_mapping VALUES
-    ('Antwerp', 'Flanders'),
-    ('Belgium', 'Federal'),
-    ('Brussels', 'Brussels'),
-    ('East-Flanders', 'Flanders'),
-    ('Flanders', 'Flanders'),
-    ('Flemish-Brabant', 'Flanders'),
-    ('Hainaut', 'Wallonia'),
-    ('Limburg', 'Flanders'),
-    ('Liège', 'Wallonia'),
-    ('Luxembourg', 'Wallonia'),
-    ('Namur', 'Wallonia'),
-    ('Wallonia', 'Wallonia'),
-    ('Walloon-Brabant', 'Wallonia'),
-    ('West-Flanders', 'Flanders');
