@@ -3,7 +3,6 @@
 # Project: Smart EV Charge recommendations leveraging AI and Elia open data
 # Purposes:    1. Handle missing values
 #              2. Engineer features to enrich master data for time series predictive modeling
-#              3. Create insights visuals for the 'Did you know?' section of the web app
 
 import pandas as pd
 import numpy as np
@@ -217,129 +216,27 @@ print(f"Preview of a lagged feature (e.g., '{new_wind_columns[0]}_lag_1h'):")
 print(df_input[[f'{new_wind_columns[0]}', f'{new_wind_columns[0]}_lag_1h']].head())
 
 
-##############################################
-### 3. Exploratory Data Analysis and Visuals #
-##############################################
-## Main objectives: create the output for the "Did you know?" part of the app recommendations
+##################################
+#### 2.4 Time Series  features ###
+##################################
+
+# Ensure 'hour' and 'weekday' columns are numeric for calculations
+df_input['hour'] = pd.to_numeric(df_input['hour'], errors='coerce').astype('Int64')
+df_input['weekday'] = pd.to_numeric(df_input['weekday'], errors='coerce').astype('Int64')
+df_input['calendar_week'] = pd.to_numeric(df_input['calendar_week'], errors='coerce').astype('Int64')
 
 
-def generate_historical_plots(df, date_string, user_province):
-    """
-    Generates two historical plots for a given date based on the weekday and calendar week.
-    
-    Args:
-        df (pd.DataFrame): The pre-processed DataFrame with historical data.
-        date_string (str): The date to analyze in 'DD-MM-YYYY' format.
-        user_province (str): The province selected by the user, e.g., 'antwerp'.
-    """
-    try:
-        # --- DATA CLEANING AND CONVERSION ---
-        user_province = user_province.lower()
-       
-        df['weekday'] = pd.to_numeric(df['weekday'], errors='coerce').astype('Int64')
-        df['hour'] = pd.to_numeric(df['hour'], errors='coerce').astype('Int64')
-        df['calendar_week'] = pd.to_numeric(df['calendar_week'], errors='coerce').astype('Int64')
-        
-        # 1. Extract weekday and calendar week from the user-provided date
-        date_obj = datetime.strptime(date_string, '%d-%m-%Y')
-        target_weekday = date_obj.weekday()
-        target_calendar_week = date_obj.isocalendar()[1]
-        target_weekday_name = date_obj.strftime('%A')
-        
-        print(f"\nAnalyzing historical data for {target_weekday_name}s in calendar week {target_calendar_week}...")
-        
-        # 2. Filter the DataFrame to get historical data for similar days
-        # This step correctly identifies similar dates in the past by matching the weekday and calendar week.
-        df_filtered = df[(df['weekday'] == target_weekday) & (df['calendar_week'] == target_calendar_week)].copy()
-        
-        if df_filtered.empty:
-            print("No historical data found for the specified weekday and calendar week.")
-            return
+# Create cyclical features for 'hour'
+df_input['hour_sin'] = np.sin(2 * np.pi * df_input['hour'] / 24)
+df_input['hour_cos'] = np.cos(2 * np.pi * df_input['hour'] / 24)
+print("Created 'hour_sin' and 'hour_cos' features.")
 
-        # Define province-to-region mapping for wind production
-        pv_flanders_provinces = ['antwerp', 'eastflanders', 'flemishbrabant', 'limburg', 'westflanders']
-        pv_wallonia_provinces = ['hainaut', 'liège', 'luxembourg', 'namur', 'walloonbrabant']
-        pv_brussels_provinces = ['brussels']
-        
-        # Find the user's region based on their province for wind data
-        user_region_wind_col = ''
-        if user_province in pv_flanders_provinces:
-            user_region_wind_col = 'area_flanders_wind_utilization_rate'
-        elif user_province in pv_wallonia_provinces:
-            user_region_wind_col = 'area_wallonia_wind_utilization_rate'
-        elif user_province in pv_brussels_provinces:
-            # Brussels doesn't have a regional wind rate, so we'll use the flanders one
-            user_region_wind_col = 'area_flanders_wind_utilization_rate'
-        else:
-            print(f"Warning: Province '{user_province}' not recognized. Defaulting to flanders wind data.")
-            user_region_wind_col = 'area_flanders_wind_utilization_rate'
+# Create cyclical features for 'weekday'
+df_input['weekday_sin'] = np.sin(2 * np.pi * df_input['weekday'] / 7)
+df_input['weekday_cos'] = np.cos(2 * np.pi * df_input['weekday'] / 7)
+print("Created 'weekday_sin' and 'weekday_cos' features.")
 
-        # Get the PV column name for the user's province
-        user_pv_col_name = f'area_{user_province}_pv_utilization_rate'
-        
-        if user_pv_col_name not in df_filtered.columns:
-            print(f"PV data for province '{user_province}' not found in the DataFrame.")
-            return
-
-        # 3. Plot 1: Historical Renewable Energy Profile
-        print("Generating Historical Renewable Energy Profile plot...")
-        
-        # The user's prompt suggests a total renewable energy plot. Let's create that.
-        df_filtered['total_renewable_utilization'] = (
-            df_filtered[user_pv_col_name] +
-            df_filtered[user_region_wind_col]
-        )
-        
-        # Recalculate hourly stats for the combined total
-        df_total_renewable = df_filtered.groupby('hour').agg(
-            mean_utilization=('total_renewable_utilization', 'mean'),
-            std_utilization=('total_renewable_utilization', 'std')
-        ).reset_index()
-        
-        plt.style.use('seaborn-v0_8-whitegrid')
-        plt.figure(figsize=(12, 6))
-        plt.plot(df_total_renewable['hour'], df_total_renewable['mean_utilization'], marker='o', color='green', label=f'Average Renewable Generation (Wind and Solar - {user_province.capitalize()})')
-        plt.fill_between(df_total_renewable['hour'],
-                         df_total_renewable['mean_utilization'] - df_total_renewable['std_utilization'],
-                         df_total_renewable['mean_utilization'] + df_total_renewable['std_utilization'],
-                         color='green', alpha=0.2, label='Standard Deviation')
-        plt.title(f'Historical Renewable Energy Generation Rate (Wind and Solar - historical days similar to {date_string} in {user_province.capitalize()})', fontsize=16)
-        plt.xlabel('Hour of the Day', fontsize=12)
-        plt.ylabel('Average Total Generation Rate', fontsize=12)
-        plt.xticks(df_total_renewable['hour'])
-        plt.legend()
-        plt.tight_layout()
-        plt.figtext(0.1, 0.005,
-            "Note: The Generation Rate is the ratio between the measured Wind & Solar energy generation and the respective estimated total capacity.", ha='left', fontsize=7, color='gray')
-        plt.show()
-
-        # 4. Plot 2: Historical Electricity Price Distribution
-        print("Generating Historical Electricity Price Distribution plot...")
-
-        # Find the hour with the lowest median price to highlight it
-        # Corrected column name to 'MarketPriceProxy'
-        hourly_medians = df_filtered.groupby('hour')['MarketPriceProxy'].median()
-        best_hour = hourly_medians.idxmin()
-        
-        plt.figure(figsize=(12, 6))
-        # Corrected column name to 'MarketPriceProxy'
-        sns.boxplot(x='hour', y='MarketPriceProxy', data=df_filtered, palette='viridis')
-        
-        # Highlight the best hour
-        # Get the position of the boxplot for the best hour
-        x_pos = list(hourly_medians.index).index(best_hour)
-        plt.axvspan(x_pos - 0.5, x_pos + 0.5, color='green', alpha=0.3, label=f'Historically Cheapest Hour ({best_hour}h)')
-
-        plt.title(f'Electricity Price (€/MWh) Distribution by Hour (historical days similar to {date_string} in {user_province.capitalize()})', fontsize=16)
-        plt.xlabel('Hour of the Day', fontsize=12)
-        plt.ylabel('Market Price (€/MWh)', fontsize=12)
-        plt.legend()
-        plt.tight_layout()
-        plt.show()
-
-    except Exception as e:
-        print(f"An error occurred while generating plots: {e}")
-        
-# Example usage of the function with a user-provided date and province
-# You would get the date and province from user input in the final web interface.
-generate_historical_plots(df_input, '05-08-2025', 'Namur')
+# Create 'is_weekend' binary feature
+# Weekday 5 is Saturday, 6 is Sunday (0 is for Monday)
+df_input['is_weekend'] = ((df_input['weekday'] == 5) | (df_input['weekday'] == 6)).astype(int)
+print("Created 'is_weekend' feature.")
