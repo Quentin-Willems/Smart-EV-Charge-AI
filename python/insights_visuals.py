@@ -165,5 +165,5 @@ if __name__ == "__main__":
     # or by loading a pre-saved version of df_input.
     
     # Call the individual plot functions
-    generate_renewable_energy_plot(df_input.copy(), '05-08-2025', 'Namur')
-    generate_electricity_price_plot(df_input.copy(), '05-08-2025', 'Namur')
+    generate_renewable_energy_plot(df_input.copy(), '15-09-2025', 'Namur')
+    generate_electricity_price_plot(df_input.copy(), '15-09-2025', 'Namur')
