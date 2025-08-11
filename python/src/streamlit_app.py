@@ -9,11 +9,10 @@ from datetime import date
 import os
 import configparser
 
-# Import the core logic from the existing scripts
-from insights_visuals import generate_electricity_price_plot
-# Note: generate_renewable_energy_plot is no longer used, so it's removed from the import.
-# Import the new prediction and recommendation service
-from prediction_service import predict_and_recommend_charging
+# Import the core logic from the existing scripts.
+# The plotting function is now part of the prediction service,
+# so we remove the import from insights_visuals and get it from here.
+from prediction_service import predict_and_recommend_charging, generate_charging_recommendation_plot
 
 ###################################
 ### 0. Configuration Variables ###
@@ -44,8 +43,9 @@ st.set_page_config(
     layout="wide"
 )
 
-st.title("⚡ Smart EV Charge Insights")
-st.markdown("Explore historical data and get recommendations for the best times to charge your EV.")
+st.title("⚡ Smart Electric Vehicle Charge Insights")
+st.markdown("Explore AI augmented recommendations for the best times to charge your EV.")
+st.markdown("The recommended charging hours are based on the predicted fluctuations in the day-ahead electricity spot market price.")
 st.markdown("""---""")
 
 # --- 2. Caching Data for Performance ---
@@ -72,7 +72,6 @@ def get_processed_data():
             )
             st.stop() # Stop the app if the data file is missing
         
-        # The st.info() call has been removed as requested.
         df_processed = pd.read_parquet(cache_file)
         return df_processed
     
@@ -99,14 +98,14 @@ with st.sidebar:
         "Select a date for analysis:",
         min_value=date.today(),
         value=date.today(),
-        help="Select the current day or a future day to see historical trends for similar days."
+        help="Select the current day or a future day."
     )
 
     # Create a dropdown list for provinces.
     selected_province = st.selectbox(
         "Select your province:",
         options=[p.capitalize() for p in provinces],
-        help="The province data will be used for the PV and Wind energy plots."
+        help="Photovoltaic and wind production vary across provinces."
     )
     
     st.markdown("""---""")
@@ -123,17 +122,17 @@ if generate_button:
     
     province_lower = selected_province.lower()
     
-    st.subheader(f"Insights and Recommendations for {selected_province} on {selected_date.strftime('%d-%m-%Y')}")
+    st.subheader(f"Insights and Recommendations for {selected_province} on {visuals_date_str}")
     
     with st.spinner("Generating recommendations and plots..."):
         # Get the recommendation from the prediction service
-        # This function expects 'YYYY-MM-DD'
+        # The function now returns a DataFrame and column name for plotting
         _, recommendations = predict_and_recommend_charging(prediction_date_str, province_lower)
 
         # Check if recommendations were successfully generated
         if recommendations and recommendations['cheapest_hours']:
             # Use an expander to make the recommendation a collapsible section
-            with st.expander("⚡ **Smart Charging Recommendation**", expanded=True):
+            with st.expander("⚡ **Best hours to charge**", expanded=True):
                 # Group recommendations by their insight text to display them concisely
                 grouped_recs = {}
                 for rec in recommendations['cheapest_hours']:
@@ -141,11 +140,17 @@ if generate_button:
                     if insight not in grouped_recs:
                         grouped_recs[insight] = []
                     grouped_recs[insight].append(rec['time'])
-
+                
+                # Sort the cheapest hours chronologically
+                all_cheapest_times = sorted([rec['time'] for rec in recommendations['cheapest_hours']])
+            
+                # Display the grouped recommendations with their insights
                 for insight, times in grouped_recs.items():
-                    hours_str = ", ".join(times)
-                    st.markdown(f"**Best Time(s) to Charge:** {hours_str}")
-                    st.markdown(insight)
+                    # Use bold for the times and the insight title
+                    sorted_times = sorted(times)
+                    hours_str = ", ".join(sorted_times)
+                    st.markdown(f"**{hours_str}** : {insight}")
+                    st.markdown("""---""") # Use a horizontal rule for separation
 
         else:
             # Display a warning if no recommendations could be generated
@@ -156,17 +161,20 @@ if generate_button:
             )
         
 
-        # Load the data for plots. This will use the cached version.
-        df_processed = get_processed_data()
+        if recommendations:
+            # Generate and display the Charging Recommendation Plot.
+            # We now use the dataframe and column name from the `recommendations` dictionary,
+            # and the formatted date string.
+            charging_rec_fig = generate_charging_recommendation_plot(
+                recommendations['df_predictions'], 
+                recommendations['final_price_column'], 
+                visuals_date_str
+            )
 
-        if df_processed is not None:
-            # Generate and display the Electricity Price Plot
-            # This function expects 'DD-MM-YYYY'
-            price_fig = generate_electricity_price_plot(df_processed.copy(), visuals_date_str, province_lower)
-            if price_fig:
+            if charging_rec_fig:
                 # The plot is now displayed in the main content area, without columns
-                st.plotly_chart(price_fig, use_container_width=True)
+                st.plotly_chart(charging_rec_fig, use_container_width=True)
             else:
-                st.warning("Could not generate the Electricity Price plot. Please check the data and scripts.")
+                st.warning("Could not generate the Charging Recommendation plot. Please check the data and scripts.")
         else:
-            st.error("Failed to load or process data. Please check your files and configuration.")
+            st.error("Failed to generate predictions and recommendations.")

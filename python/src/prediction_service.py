@@ -12,6 +12,7 @@ from datetime import datetime, timedelta
 import warnings
 import os
 import configparser
+import plotly.graph_objects as go
 
 # Suppress joblib-related user warnings
 warnings.filterwarnings("ignore", message="The feature names should match")
@@ -79,44 +80,32 @@ def generate_recommendation_insights(best_hour, month):
         str: A formatted string with a title and explanation.
     """
     # A. Summer Period (May - August)
-    # Primary driver: High solar energy production in midday.
     if month in [5, 6, 7, 8]:
         if 10 <= best_hour <= 16:
-            # Midday is the core opportunity due to high solar output.
-            return f"**Solar-Powered Charge!**\n\n" \
-                   f"In summer, the cheapest electricity is often in the middle of the day. This is when solar energy production is at its peak in Belgium, flooding the grid with green power and lowering prices. Take advantage of this surplus to charge at a lower cost!"
+            return f"**🔆 Midday Solar Charging Window (Summer)**\n\n" \
+                   f"Solar energy production is at its peak, driving prices down."
         else:
-            # Generic advice for low-price moments outside the solar peak.
-            return f"**Off-Peak Savings!**\n\n" \
-                   f"Even outside of midday, other low-cost hours can appear in summer. Our prediction indicates this is the most economical window for today, driven by a combination of lower demand and favorable weather conditions."
-
-    # B. Winter Period (November - February)
-    # Primary driver: Low demand at night and potential for wind energy.
+            return f"**🌅 Off-Peak Charging Opportunity (Summer)**\n\n" \
+                   f"Reduced grid demand and favorable weather conditions outside peak solar hours. It's a smart moment to charge efficiently."
+        
+    # B. Winter Period (November – February)
     elif month in [11, 12, 1, 2]:
-        if 1 <= best_hour <= 9:
-            # Late night/early morning is the historical sweet spot for low prices.
-            return f"**Overnight Power-Up!**\n\n" \
-                   f"In winter, the best time to charge is often during the night or early morning. This is when demand on the national grid is at its lowest, leading to a natural drop in prices. High wind power generation during these hours can further amplify the savings."
+        if 22 <= best_hour or best_hour <= 6:
+            return f"**🌙 Low-Demand Charging Window (Winter)**\n\n" \
+                   f"Grid demand is minimal and wind energy generation is strong, leading to lower prices."
         else:
-            # Advice for rare low-price moments during the day.
-            return f"**Daytime Opportunity!**\n\n" \
-                   f"While prices are typically highest in winter, our analysis shows a low-cost window during the day. This could be due to a sudden increase in wind energy or a temporary dip in industrial demand. Seize the opportunity!"
+            return f"**🌤️ Favorable Grid Conditions (Winter)**\n\n" \
+                   f"Temporary surge in solar or wind production combined with favorable grid dynamics. It's a great opportunity to charge efficiently."
 
-    # C. Transition Periods (March - April & September - October)
-    # Primary driver: A mix of solar and wind, leading to variable price profiles.
+       
+# D. Transition Periods (March – April & September – October)
     elif month in [3, 4, 9, 10]:
         if 10 <= best_hour <= 15:
-            # Midday is best on sunny days due to solar.
-            return f"**Midday Opportunity!**\n\n" \
-                   f"In spring and autumn, the best times to charge can vary with the weather. A sunny day will favor low-cost charging in the afternoon thanks to solar power. Our prediction accounts for these factors!"
-        elif 23 <= best_hour or best_hour <= 4:
-            # Late night/early morning is best on windier days or when demand is low.
-            return f"**Late Night Special!**\n\n" \
-                   f"In spring and autumn, charging times can vary. A day with high winds may offer great opportunities late in the evening or during the night. Our prediction takes these factors into account!"
+            return f"**🌤️ Midday Charging Window**\n\n" \
+                   f"Solar energy production is favorable during these hours, driving price down."
         else:
-            # Fallback for any other hour in the transition period.
-            return f"**Opportunistic Charging!**\n\n" \
-                   f"During the transitional seasons, the best charging times can vary based on weather and demand. Our prediction helps you find the most economical window for today!"
+            return f"**🍃 Off-Peak Charging Opportunity**\n\n" \
+                   f"Increased wind generation and lower grid demand during off-peak hours. It's a cost-effective moment to charge your EV."
 
     # D. Default Case (Error or unexpected month)
     else:
@@ -220,7 +209,9 @@ def predict_and_recommend_charging(date_str, region):
     """
     Loads the best trained model, predicts the market price for each hour of a given date,
     and recommends the best hours to charge based on the lowest predicted prices.
-    Includes a sanity check against historical median prices.
+    
+    This version blends model predictions with historical price profiles to create
+    a more varied and realistic hourly price curve for better recommendations.
 
     Args:
         date_str (str): The date to predict in 'YYYY-MM-DD' format.
@@ -245,7 +236,7 @@ def predict_and_recommend_charging(date_str, region):
             rmse = model_data['rmse']
             print(f"Model RMSE successfully loaded: {rmse:.2f}")
         except KeyError:
-            rmse = 41.55  # Fallback to the hardcoded value if not found
+            rmse = 41.55  # Fallback to a hardcoded value if not found
             print(f"Warning: 'rmse' not found in joblib file. Using default value: {rmse:.2f}")
             
         print("Model and features successfully loaded.")
@@ -269,16 +260,14 @@ def predict_and_recommend_charging(date_str, region):
     print(f"\n--- Generating predictions for {target_date.strftime('%Y-%m-%d')} ---")
     
     # Identify features for which to calculate historical averages
-    # These are all non-time and non-autoregressive features.
     autoregressive_lags = [f for f in features_list if 'MarketPriceProxy_lag' in f]
     time_features = list(create_time_features(target_date).keys())
+    covariate_features_to_average = [f for f in features_list if f not in time_features and f not in autoregressive_lags]
     
-    covariate_features_to_average = [
-        f for f in features_list if f not in time_features and f not in autoregressive_lags
-    ]
+    # Include the target variable for historical averaging, which is crucial for the new blending approach
+    features_for_historical_averages = covariate_features_to_average + ['MarketPriceProxy']
 
-    # Calculate hourly averages for relevant features from similar past days
-    historical_averages = get_historical_averages(df_input.copy(), target_date, covariate_features_to_average)
+    historical_averages = get_historical_averages(df_input.copy(), target_date, features_for_historical_averages)
 
     # Initialize a list to store the predictions
     predictions = []
@@ -294,107 +283,103 @@ def predict_and_recommend_charging(date_str, region):
     }
 
     # Iterate through each hour of the day (0 to 23)
+    initial_predictions_list = []
     for hour in range(24):
         current_datetime = target_date + timedelta(hours=hour)
         
         # Build the feature vector for the current hour
         feature_vector = {}
-        
-        # Add time-based features
         feature_vector.update(create_time_features(current_datetime))
         
-        # Add historical average covariates (including their lags)
         if not historical_averages.empty:
             hourly_avg_row = historical_averages.loc[hour]
-            feature_vector.update(hourly_avg_row.to_dict())
+            feature_vector.update(hourly_avg_row[covariate_features_to_average].to_dict())
         else:
-            # Fallback to zeros if no historical averages were found
             for feature in covariate_features_to_average:
                 feature_vector[feature] = 0
 
-        # Add the autoregressive lagged features, which are being updated iteratively
         feature_vector.update(current_autoregressive_lags)
         
-        # Convert to a DataFrame row and reorder columns to match the features used in training
         feature_df = pd.DataFrame([feature_vector], columns=features_list)
         
-        # Make a prediction
         try:
             predicted_price = model.predict(feature_df)[0]
         except Exception as e:
             print(f"Prediction failed for hour {hour}: {e}")
             predicted_price = np.nan
         
-        # Calculate the prediction interval with the dynamically fetched RMSE
-        lower, upper = get_prediction_interval(predicted_price, rmse=rmse)
-        
-        # Store the prediction and the interval
-        predictions.append({
-            'datetime': current_datetime,
-            'predicted_price': predicted_price,
-            'lower_bound': lower,
-            'upper_bound': upper
-        })
-
-        # Update the autoregressive lagged features for the next hour's prediction
-        # The 1-hour lag becomes the current prediction, while the others shift
+        # Store initial prediction and update lags for the next hour
+        initial_predictions_list.append(predicted_price)
         current_autoregressive_lags['MarketPriceProxy_lag_24h'] = current_autoregressive_lags['MarketPriceProxy_lag_6h']
         current_autoregressive_lags['MarketPriceProxy_lag_6h'] = current_autoregressive_lags['MarketPriceProxy_lag_1h']
         current_autoregressive_lags['MarketPriceProxy_lag_1h'] = predicted_price
     
+    # --- Blending Logic ---
+    print("\n--- Blending Model Prediction with Historical Price Profile for Variance ---")
+    
+    # Motivation for Blending:
+    # This approach is a strategic compromise for the MVP. The initial predictions, based on historical
+    # averages for future features, often lack the natural daily variance needed for meaningful
+    # recommendations (e.g., distinguishing between cheap and expensive hours).
+    #
+    # By blending the model's overall predicted price level with the typical hourly shape
+    # from historical data, we create a more realistic and actionable price curve. This
+    # provides a much better user experience while we await the implementation of
+    # a more advanced system that uses real-time API data for weather and Elia load forecasts.
+    # Future versions will replace this blending method with a live-data-driven approach.
+    
+    # Convert initial predictions to a DataFrame
+    df_predictions = pd.DataFrame({
+        'datetime': [target_date + timedelta(hours=h) for h in range(24)],
+        'predicted_price': initial_predictions_list
+    })
+    df_predictions['hour'] = df_predictions['datetime'].dt.hour
+    
+    if not historical_averages.empty and 'MarketPriceProxy' in historical_averages.columns:
+        # Get the historical price profile from the averages
+        historical_price_profile = historical_averages['MarketPriceProxy']
+        
+        # Calculate the daily average from both predictions and history
+        predicted_daily_average = df_predictions['predicted_price'].mean()
+        historical_daily_average = historical_price_profile.mean()
+        
+        # Calculate the difference of each historical hour from its daily average
+        historical_diff = historical_price_profile - historical_daily_average
+        
+        # Create the blended price curve: predicted average + historical shape
+        # This preserves the model's overall price level while adding the hourly variance of history
+        df_predictions['blended_price'] = predicted_daily_average + historical_diff
+        
+        # Use a reasonable minimum for prices to avoid negative values
+        df_predictions['blended_price'] = df_predictions['blended_price'].clip(lower=0)
+        
+        print("Blending successful. Recommendations will be based on the blended price curve.")
+        final_price_column = 'blended_price'
+    else:
+        print("Historical data for 'MarketPriceProxy' not available for blending. Reverting to original predictions.")
+        final_price_column = 'predicted_price'
+
+    # Now, re-populate the final predictions list with the chosen prices and intervals
+    predictions = []
+    for index, row in df_predictions.iterrows():
+        price = row[final_price_column]
+        lower, upper = get_prediction_interval(price, rmse=rmse)
+        predictions.append({
+            'datetime': row['datetime'],
+            'predicted_price': price,
+            'lower_bound': lower,
+            'upper_bound': upper
+        })
+    
     # Sort predictions by price to find the cheapest hours
     predictions.sort(key=lambda x: x['predicted_price'])
     
-    # Get the top 3 predicted cheapest hours
-    cheapest_predicted_hours = predictions[:3]
-    predicted_hours_only = [p['datetime'].hour for p in cheapest_predicted_hours]
+    # Get the top 4 cheapest hours, the middle 10, and the most expensive 10
+    cheapest_to_recommend = predictions[:4]
+    most_expensive_hours = predictions[-10:]
+    middle_hours = predictions[4:-10]
 
-    # --- Sanity Check against Historical Data ---
-    print("\n--- Performing Sanity Check against Historical Data ---")
-    historical_df_for_check = df_input.copy()
-    historical_df_for_check['weekday'] = historical_df_for_check.index.weekday
-    historical_df_for_check['month'] = historical_df_for_check.index.month
-
-    # Filter historical data for the same month and weekday
-    target_month = target_date.month
-    target_weekday = target_date.weekday()
-    similar_days_df = historical_df_for_check[
-        (historical_df_for_check['month'] == target_month) &
-        (historical_df_for_check['weekday'] == target_weekday)
-    ].copy()
-    
-    # Find the hour with the lowest median price from historical data
-    if not similar_days_df.empty:
-        hourly_medians = similar_days_df.groupby(similar_days_df.index.hour)['MarketPriceProxy'].median()
-        best_historical_hour = hourly_medians.idxmin()
-        print(f"Historically cheapest hour (based on median price) for similar days is: {best_historical_hour}h")
-    else:
-        best_historical_hour = None
-        print("Warning: No historical data available to perform sanity check. Recommending based on prediction only.")
-
-    final_recommendations = []
-    
-    if best_historical_hour is not None and best_historical_hour in predicted_hours_only:
-        print("Sanity check passed: Historically cheapest hour is in the top 3 predictions.")
-        cheapest_to_recommend = cheapest_predicted_hours
-    elif best_historical_hour is not None:
-        print("Sanity check failed: Historically cheapest hour is NOT in the top 3 predictions. Recommending only the best historical hour.")
-        print("The initial top 3 predicted hours were:")
-        for p in cheapest_predicted_hours:
-            print(f" - {p['datetime'].strftime('%H:%M')} (Predicted price: {p['predicted_price']:.2f} €)")
-        
-        # Find the prediction for the best historical hour to get its full data
-        best_historical_prediction = next((p for p in predictions if p['datetime'].hour == best_historical_hour), None)
-        if best_historical_prediction:
-            cheapest_to_recommend = [best_historical_prediction]
-        else:
-            cheapest_to_recommend = cheapest_predicted_hours # Fallback if historical hour prediction is missing
-            print("Warning: Prediction for the best historical hour could not be found. Falling back to predicted recommendations.")
-    else:
-        print("Cannot perform sanity check. Recommending based on model prediction only.")
-        cheapest_to_recommend = cheapest_predicted_hours
-
-    # Now, format the final recommendations and add the insights
+    # --- Recommendations Formatting ---
     cheapest_hours_formatted = []
     for p in cheapest_to_recommend:
         insights_text = generate_recommendation_insights(p['datetime'].hour, p['datetime'].month)
@@ -405,47 +390,190 @@ def predict_and_recommend_charging(date_str, region):
             'insight': insights_text
         })
         
-    most_expensive_hours = [
-        (p['datetime'].strftime('%H:%M'), f"{p['predicted_price']:.2f}", f"[{p['lower_bound']:.2f} - {p['upper_bound']:.2f}]") for p in predictions[-3:]
+    most_expensive_hours_formatted = [
+        (p['datetime'].strftime('%H:%M'), f"{p['predicted_price']:.2f}", f"[{p['lower_bound']:.2f} - {p['upper_bound']:.2f}]") for p in most_expensive_hours
+    ]
+    
+    middle_hours_formatted = [
+        (p['datetime'].strftime('%H:%M'), f"{p['predicted_price']:.2f}", f"[{p['lower_bound']:.2f} - {p['upper_bound']:.2f}]") for p in middle_hours
     ]
 
     recommendations = {
         'date': date_str,
         'region': region,
         'cheapest_hours': cheapest_hours_formatted,
-        'most_expensive_hours': most_expensive_hours
+        'middle_hours': middle_hours_formatted,
+        'most_expensive_hours': most_expensive_hours_formatted,
+        'df_predictions': df_predictions, # Return the DataFrame for plotting
+        'final_price_column': final_price_column # Return the column name for plotting
     }
     
     print("\n--- Final Charging Recommendations ---")
     if cheapest_to_recommend:
-        print(f"For {region.capitalize()} on {date_str}, the best hours to charge are:")
-        
-        # Group recommendations by insight text to avoid duplication
+        # Group hours by their insight text to avoid duplication
         grouped_recs = {}
         for rec in cheapest_hours_formatted:
             insight = rec['insight']
             if insight not in grouped_recs:
                 grouped_recs[insight] = []
             grouped_recs[insight].append(rec['time'])
-
+        
+        # Sort the cheapest hours chronologically before printing
+        all_cheapest_times = sorted([rec['time'] for rec in cheapest_hours_formatted])
+        print(f"Best Times to Charge: {', '.join(all_cheapest_times)}\n")
+        
+        # New, restructured printing loop
         for insight, times in grouped_recs.items():
-            hours_str = ", ".join(times)
-            print(f"Hours: {hours_str}")
-            print(f"Insight:\n{insight}")
+            sorted_times = sorted(times) # Sort times chronologically for each insight
+            print(f"{', '.join(sorted_times)}  :   {insight}")
             print("-" * 20)
+
     else:
         print("No charging recommendations could be made.")
-
+    
     return predictions, recommendations
 
 
-if __name__ == "__main__":
+def generate_charging_recommendation_plot(df_predictions, price_column, date_string):
+    """
+    Generates a visual summary of recommended charging hours based on predicted prices,
+    displaying hours as color-coded squares on a single line.
+
+    Args:
+        df_predictions (pd.DataFrame): The DataFrame with blended predicted prices.
+        price_column (str): The name of the column containing the prices to use for categorization.
+        date_string (str): The date for the plot title.
+
+    Returns:
+        plotly.graph_objects.Figure: The generated Plotly figure.
+    """
+    try:
+        print("Generating Charging Recommendation plot with Plotly...")
+        
+        # Sort hours by predicted price to find the cheapest/most expensive hours
+        df_sorted = df_predictions.sort_values(by=price_column).reset_index(drop=True)
+        
+        # Categorize hours into three groups based on price
+        cheapest_hours = df_sorted.iloc[:4]['hour'].tolist()
+        middle_hours = df_sorted.iloc[4:14]['hour'].tolist()
+        expensive_hours = df_sorted.iloc[14:]['hour'].tolist()
+
+        # Define color schemes for fill and border
+        color_schemes = {
+            'optimal': {'fill': '#2ECC71', 'border': '#27AE60'},  # Green
+            'moderate': {'fill': '#F39C12', 'border': '#D38A10'}, # Amber
+            'avoid': {'fill': '#E74C3C', 'border': '#C0392B'}      # Red
+        }
+
+        # Create a color mapping for the hours
+        fill_color_map = {}
+        border_color_map = {}
+        category_map = {}
+        for h in cheapest_hours:
+            fill_color_map[h] = color_schemes['optimal']['fill']
+            border_color_map[h] = color_schemes['optimal']['border']
+            category_map[h] = 'Optimal Charging Hours'
+        for h in middle_hours:
+            fill_color_map[h] = color_schemes['moderate']['fill']
+            border_color_map[h] = color_schemes['moderate']['border']
+            category_map[h] = 'Moderate Price Hours'
+        for h in expensive_hours:
+            fill_color_map[h] = color_schemes['avoid']['fill']
+            border_color_map[h] = color_schemes['avoid']['border']
+            category_map[h] = 'Avoid Charging Hours'
+
+        # Create a DataFrame for the plot
+        plot_df = pd.DataFrame({
+            'hour': range(24),
+            'y_value': [0] * 24,  # All points on the same line
+            'marker_fill_color': [fill_color_map.get(h, '#808080') for h in range(24)],
+            'marker_border_color': [border_color_map.get(h, '#666666') for h in range(24)],
+            'category': [category_map.get(h, 'Uncategorized') for h in range(24)]
+        })
+
+        fig = go.Figure()
+
+        # Add the scatter plot for the charging recommendations
+        fig.add_trace(go.Scatter(
+            x=plot_df['hour'],
+            y=plot_df['y_value'],
+            mode='markers',
+            marker=dict(
+                color=plot_df['marker_fill_color'],
+                symbol='square',
+                size=30,
+                line=dict(color=plot_df['marker_border_color'], width=4) # Bold border lines with darker color
+            ),
+            hovertemplate='<b>Hour: %{x}h</b><br>Category: %{customdata[0]}<extra></extra>',
+            customdata=plot_df[['category']],
+            showlegend=False  # Remove this trace from the legend
+        ))
+
+        # Add invisible traces for the custom legend
+        fig.add_trace(go.Scatter(x=[None], y=[None], mode='markers', marker=dict(size=14, color=color_schemes['optimal']['fill'], symbol='square', line=dict(width=2, color=color_schemes['optimal']['border'])), name='Optimal Charging Hours'))
+        fig.add_trace(go.Scatter(x=[None], y=[None], mode='markers', marker=dict(size=14, color=color_schemes['moderate']['fill'], symbol='square', line=dict(width=2, color=color_schemes['moderate']['border'])), name='Moderate Price Hours'))
+        fig.add_trace(go.Scatter(x=[None], y=[None], mode='markers', marker=dict(size=14, color=color_schemes['avoid']['fill'], symbol='square', line=dict(width=2, color=color_schemes['avoid']['border'])), name='Avoid Charging Hours'))
+
+        # Update layout for a clean look
+        fig.update_layout(
+            title={
+                'text': '<b>Recommended Charging Hours</b>',
+                'font': dict(size=20, family='Arial', color='#333'),
+                'x': 0.5,
+                'xanchor': 'center'
+            },
+            xaxis_title="", # X-axis title is now blank
+            xaxis_title_font=dict(size=18, family='Arial Black'),
+            xaxis_tickfont=dict(size=18, family='Arial Black'),
+            xaxis={'tickmode': 'linear', 'dtick': 1, 'range': [-0.5, 23.5], 'title_standoff': 10},
+            yaxis={'showticklabels': False, 'showgrid': False, 'zeroline': False},
+            template='plotly_white',
+            showlegend=True,
+            legend=dict(
+                orientation="h",
+                yanchor="bottom",
+                y=1.05,
+                xanchor="center",
+                x=0.5,
+                font=dict(size=18)
+            ),
+            height=300
+        )
+        
+        return fig
+
+    except Exception as e:
+        print(f"An error occurred while generating the charging recommendation plot: {e}")
+        return None
+
+def main():
+    """
+    Main function to run the prediction and generate the visualization.
+    """
     # Example usage
     target_date_str = '2025-08-28'  
     target_region = 'namur'
     
     all_predictions, recs = predict_and_recommend_charging(target_date_str, target_region)
-    
+
     if recs:
         print("\n--- Final Recommendation Summary ---")
         print(recs)
+        
+        # Now, call the plotting function with the returned data
+        plot = generate_charging_recommendation_plot(recs['df_predictions'], recs['final_price_column'], target_date_str)
+        
+        if plot:
+            print("\n--- Plotly Figure Data (Local Only) ---")
+            # The .show() method opens a new browser window/tab to display the plot.
+            # This is intended for local execution where a browser is available.
+            plot.show()
+        else:
+            print("\n--- Plotly Figure Data ---")
+            print("Failed to generate plot.")
+    else:
+        print("Failed to generate predictions and recommendations.")
+
+
+if __name__ == "__main__":
+    main()

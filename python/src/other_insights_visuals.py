@@ -1,7 +1,7 @@
-# alternativeplot.py
+# insights_visuals.py
 # Author: Quentin Willems
 # Project: Smart EV Charge recommendations leveraging AI and Elia open data
-# Purpose: Create historical insight visuals for the "Did you know?" section of the web app.
+# Purpose: Create historical insight visuals for the web app.
 # Dependencies:
 #     - data_processing.py
 
@@ -11,6 +11,7 @@ import plotly.graph_objects as go
 import plotly.express as px
 from datetime import datetime
 
+# Assuming data_processing.py is available in the same context
 from data_processing import load_data_from_postgres, engineer_features
 
 def _prepare_data_for_plots(df, date_string, user_province):
@@ -96,7 +97,6 @@ def generate_renewable_energy_plot(df, date_string, user_province):
         print("Generating Historical Renewable Energy Profile plot with Plotly...")
         
         # Calculate the total renewable utilization
-        # --- UPDATED: Handle cases where wind column is None ---
         pv_series = df_filtered.get(user_pv_col_name, 0)
         wind_series = df_filtered.get(user_region_wind_col, 0) if user_region_wind_col else 0
         df_filtered['total_renewable_utilization'] = pv_series + wind_series
@@ -175,10 +175,9 @@ def generate_renewable_energy_plot(df, date_string, user_province):
         print(f"An error occurred while generating the renewable energy plot: {e}")
         return None
 
-
 def generate_electricity_price_plot(df, date_string, user_province):
     """
-    Generates the historical electricity price distribution plot using Plotly with enhanced visuals and a categorical color scheme.
+    Generates a historical electricity price quartile plot using Plotly, showing Q1, Median, and Q3.
     
     Args:
         df (pd.DataFrame): The pre-processed DataFrame with historical data.
@@ -195,17 +194,20 @@ def generate_electricity_price_plot(df, date_string, user_province):
         if df_filtered is None:
             return None
 
-        print("Generating Historical Electricity Price Distribution plot with Plotly...")
-
+        print("Generating Historical Electricity Price Quartile plot with Plotly...")
+        
+        # Calculate Q1, Median, and Q3 for each hour
+        hourly_quartiles = df_filtered.groupby('hour')['MarketPriceProxy'].quantile([0.25, 0.5, 0.75]).unstack().reset_index()
+        hourly_quartiles.columns = ['hour', 'q1', 'median', 'q3']
+        
         # Calculate median price for each hour and sort to find the cheapest/most expensive hours
-        hourly_medians = df_filtered.groupby('hour')['MarketPriceProxy'].median().reset_index()
-        hourly_medians = hourly_medians.sort_values(by='MarketPriceProxy').reset_index(drop=True)
+        hourly_medians = hourly_quartiles.sort_values(by='median').reset_index(drop=True)
 
         # Categorize hours into three groups based on price
         cheapest_hours = hourly_medians.iloc[:4]['hour'].tolist()
         middle_hours = hourly_medians.iloc[4:14]['hour'].tolist()
         expensive_hours = hourly_medians.iloc[14:]['hour'].tolist()
-        
+
         # Create a color mapping for the hours
         color_map = {}
         for h in cheapest_hours:
@@ -215,32 +217,51 @@ def generate_electricity_price_plot(df, date_string, user_province):
         for h in expensive_hours:
             color_map[h] = '#E74C3C'  # Red for expensive hours
         
+        # Map the colors to the hours in the original sorted order
+        hourly_quartiles['marker_color'] = hourly_quartiles['hour'].map(color_map)
+
         fig = go.Figure()
+
+        # Add the shaded area between Q1 and Q3 to represent the interquartile range
+        # Use a soft gray color for the area and lines
+        fig.add_trace(go.Scatter(
+            x=hourly_quartiles['hour'],
+            y=hourly_quartiles['q3'],
+            mode='lines',
+            line=dict(width=0, color='#bdbdbd'),
+            showlegend=False,
+            name='Q3',
+        ))
+        fig.add_trace(go.Scatter(
+            x=hourly_quartiles['hour'],
+            y=hourly_quartiles['q1'],
+            mode='lines',
+            line=dict(width=0, color='#bdbdbd'),
+            fill='tonexty',
+            fillcolor='rgba(128, 128, 128, 0.2)', # Semi-transparent gray for the IQR
+            showlegend=False,
+            name='Interquartile Range (IQR)',
+        ))
         
-        # Add invisible traces to create a custom legend with updated names
-        fig.add_trace(go.Scatter(x=[None], y=[None], mode='markers', marker=dict(size=10, color='#2ECC71'), name='Optimal Charging Hours'))
-        fig.add_trace(go.Scatter(x=[None], y=[None], mode='markers', marker=dict(size=10, color='#F39C12'), name='Moderate Price Hours'))
-        fig.add_trace(go.Scatter(x=[None], y=[None], mode='markers', marker=dict(size=10, color='#E74C3C'), name='Avoid Charging Hours'))
+        # Add the line plot for the median with color-coded markers
+        fig.add_trace(go.Scatter(
+            x=hourly_quartiles['hour'],
+            y=hourly_quartiles['median'],
+            mode='lines+markers',
+            marker=dict(color=hourly_quartiles['marker_color'], size=14), # Color-coded and larger markers
+            line=dict(color="#858585", width=2), # Gray line
+            hovertemplate='Hour: %{x}<br>Median Price: %{y:.2f} €/MWh<extra></extra>'
+        ))
 
-
-        # Add a box plot trace for each hour with the new color scheme
-        for hour in range(24):
-            hour_data = df_filtered[df_filtered['hour'] == hour]
-            if not hour_data.empty:
-                fig.add_trace(go.Box(
-                    y=hour_data['MarketPriceProxy'],
-                    name=f'{hour:02d}h',
-                    marker_color=color_map.get(hour, '#bdc3c7'),
-                    hovertemplate='Hour: %{x}<br>Price: %{y:.2f} €/MWh<extra></extra>',
-                    showlegend=False,
-                    boxpoints=False,
-                    showwhiskers=False # This line removes the whiskers
-                ))
+        # Add invisible traces for the custom legend
+        fig.add_trace(go.Scatter(x=[None], y=[None], mode='markers', marker=dict(size=14, color='#2ECC71'), name='Optimal Charging Hours'))
+        fig.add_trace(go.Scatter(x=[None], y=[None], mode='markers', marker=dict(size=14, color='#F39C12'), name='Moderate Price Hours'))
+        fig.add_trace(go.Scatter(x=[None], y=[None], mode='markers', marker=dict(size=14, color='#E74C3C'), name='Avoid Charging Hours'))
         
         # Update layout for a cleaner look, with increased font size and centered legend
         fig.update_layout(
             title={
-                'text': f'<b>Electricity Price (€/MWh) Distribution by Hour (similar days in {user_province.capitalize()})</b>',
+                'text': f'<b>Electricity Price (€/MWh) by Hour</b>',
                 'font': dict(size=20, family='Arial', color='#333'),
                 'x': 0.5,
                 'xanchor': 'center'
@@ -251,21 +272,20 @@ def generate_electricity_price_plot(df, date_string, user_province):
             yaxis_title_font=dict(size=16),
             xaxis_tickfont=dict(size=14),
             yaxis_tickfont=dict(size=14),
-            xaxis={'tickmode': 'linear', 'dtick': 1},
+            xaxis={'tickmode': 'linear', 'dtick': 1, 'range': [-0.5, 23.5]},
             yaxis={'dtick': 50},
             template='plotly_white',
             showlegend=True,
             legend=dict(
                 orientation="h",
                 yanchor="top",
-                y=1.03,  # Adjusted legend position to be below the title
+                y=1.03,
                 xanchor="center",
                 x=0.5,
                 font=dict(size=18)
             ),
-            height=600 # This line sets the height of the plot
+            height=600
         )
-        # Round the y-axis ticks to two decimal places
         fig.update_yaxes(tickformat=".2f")
         
         # Add a single annotation for the footnote
@@ -282,7 +302,7 @@ def generate_electricity_price_plot(df, date_string, user_province):
         return fig
 
     except Exception as e:
-        print(f"An error occurred while generating the electricity price plot: {e}")
+        print(f"An error occurred while generating the electricity quartile plot: {e}")
         return None
 
 if __name__ == "__main__":
