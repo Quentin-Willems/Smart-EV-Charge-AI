@@ -50,8 +50,7 @@ def load_data_from_file():
 
         if not os.path.exists(cache_file):
             print(
-                "Error: Data file not found! Please run `data_processing.py` locally first "
-                "to generate the `processed_data.parquet` file."
+                "Error: Data file not found! Please run 'data_processing.py' locally first to generate the 'processed_data.parquet' file."
             )
             return None
         
