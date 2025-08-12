@@ -4,6 +4,7 @@
 # Purpose: Train different models (Random Forest, XGBoost, ARIMA and TCN) to predict 'MarketPriceProxy'. Select the best one then save it.
 # Dependencies:
 #     - data_processing.py
+#     - config.ini for configuration variables/paths
 
 import pandas as pd
 import numpy as np
@@ -62,7 +63,7 @@ def prepare_features_and_target(df):
             print("Error: 'timestamp' column not found and index is not DatetimeIndex. Cannot proceed.")
             return None, None, None
 
-    # Set a consistent hourly frequency to ensure there are no missing time steps
+    # Treat this index as having regular hourly intervals to ensure there are no missing time steps (missing timestamps will show up as rows with NaN values)
     df = df.asfreq('H')
 
     # Convert relevant columns to numeric if they are objects
@@ -70,9 +71,10 @@ def prepare_features_and_target(df):
         if col in df.columns:
             df.loc[:, col] = pd.to_numeric(df[col], errors='coerce').astype('Int64')
 
+    # Define model target
     target = 'MarketPriceProxy'
     
-    # --- UPDATED: Feature list to reflect the changes in data_processing.py ---
+    # Feature list to reflect the changes in data_processing.py ---
     features_list = [
         'avg_load', 'avg_systemimbalance', 'avg_netregulationvolume',
         'area_antwerp_pv_utilization_rate', 'area_eastflanders_pv_utilization_rate',
@@ -122,7 +124,7 @@ def prepare_features_and_target(df):
 
     # Handle NaNs from lagged features at the beginning of the series
     combined_df = pd.concat([X, y], axis=1)
-    # The new `.asfreq('H')` can create NaNs, so we need to fill them.
+    # The .asfreq('H') can create NaNs, so we need to fill them.
     # We use ffill and bfill to carry forward/backward known values.
     combined_df = combined_df.fillna(method='ffill').fillna(method='bfill')
     combined_df.dropna(inplace=True)
@@ -151,7 +153,7 @@ def train_compare_and_save_best_model(df):
         print("Data preparation failed. Cannot train models.")
         return None, None
 
-    # Time-based Train/Test Split
+    # Time-based Train/Test Split (note: for time series we need a chronological split and not a random split)
     train_size = int(len(X) * 0.8)
     X_train_df, X_test_df = X.iloc[:train_size], X.iloc[train_size:]
     y_train_df, y_test_df = y.iloc[:train_size], y.iloc[train_size:]
@@ -280,7 +282,6 @@ def train_compare_and_save_best_model(df):
 
 
 if __name__ == "__main__":
-    # The new execution block now loads and processes the data directly
     # First, load the raw data from PostgreSQL
     df_raw = load_data_from_postgres()
 

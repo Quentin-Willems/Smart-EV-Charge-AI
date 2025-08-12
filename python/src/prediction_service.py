@@ -1,21 +1,19 @@
 # prediction_service.py
 # Author: Quentin Willems
 # Project: Smart EV Charge recommendations leveraging AI and Elia open data
-# Purpose: Predict a full day's market price, recommend best charging hours and provide contextual insights.
+# Purpose: Predict a full day's market price, recommend best charging hours and provide contextual insights (including a the recommendation plot used in the web app).
 # Dependencies:
-#     - data_processing.py (for initial data generation)
+#     - data_processing.py (indirect - for initial data prep for model_builder.py)
+#     - model_builder.py (to generate the stored model in ev_charge_model.joblib)
+#     - config.ini for confirguration variables/paths
 
 import pandas as pd
 import numpy as np
 import joblib
 from datetime import datetime, timedelta
-import warnings
 import os
 import configparser
 import plotly.graph_objects as go
-
-# Suppress joblib-related user warnings
-warnings.filterwarnings("ignore", message="The feature names should match")
 
 ###################################
 ### 0. Configuration Variables ###
@@ -40,7 +38,7 @@ def load_config(config_file='config.ini'):
 
 def load_data_from_file():
     """
-    Loads the pre-computed data from the .parquet file for persistent caching (avoid connecting to DB again to align the app deployment strategy)
+    Loads the pre-computed data from the .parquet file for persistent caching (avoid connecting to DB again to align with the app deployment strategy)
     
     Returns:
         pd.DataFrame: The loaded and processed DataFrame, or None if an error occurs.
@@ -126,14 +124,15 @@ def get_historical_averages(historical_df, date_to_predict, features_to_average)
     Returns:
         pd.DataFrame: A DataFrame with the hourly average values for each feature.
     """
-    # Filter historical data for the same month and weekday
+    ### Store weekday and month in new columns in dataframe based on index value (timestamp index)
     historical_df['weekday'] = historical_df.index.weekday
     historical_df['month'] = historical_df.index.month
 
-    # Find the month and weekday of the target date
+    ### Find the month and weekday of the target date
     target_month = date_to_predict.month
     target_weekday = date_to_predict.weekday()
 
+    ### Filter historical data for the same month and weekday
     similar_days_df = historical_df[
         (historical_df['month'] == target_month) &
         (historical_df['weekday'] == target_weekday)
@@ -207,11 +206,13 @@ def get_prediction_interval(predicted_price, rmse, confidence_level=0.95):
 
 def predict_and_recommend_charging(date_str, region):
     """
-    Loads the best trained model, predicts the market price for each hour of a given date,
+    Loads the best trained model, predicts the market price for each hour of a given date
     and recommends the best hours to charge based on the lowest predicted prices.
     
     This version blends model predictions with historical price profiles to create
-    a more varied and realistic hourly price curve for better recommendations.
+    a more varied and realistic hourly price curve for better recommendations. 
+    In a future version, a more dynamic version for future value of covariates
+    will include real-time connection to source data API.
 
     Args:
         date_str (str): The date to predict in 'YYYY-MM-DD' format.
@@ -222,6 +223,7 @@ def predict_and_recommend_charging(date_str, region):
         tuple: (list of dicts with hourly predictions, dict with recommendations)
     """
     try:
+        # Find the path where the model (.joblib) is stored using the config.ini file.
         config = load_config()
         model_path = config['Paths']['model_path']
         model_filename = config['Paths']['model_filename']
@@ -236,7 +238,7 @@ def predict_and_recommend_charging(date_str, region):
             rmse = model_data['rmse']
             print(f"Model RMSE successfully loaded: {rmse:.2f}")
         except KeyError:
-            rmse = 41.55  # Fallback to a hardcoded value if not found
+            rmse = 41.55  # Fallback to a hardcoded value if not found (i.e. averaged best rmse observed during manual testing)
             print(f"Warning: 'rmse' not found in joblib file. Using default value: {rmse:.2f}")
             
         print("Model and features successfully loaded.")
@@ -260,11 +262,11 @@ def predict_and_recommend_charging(date_str, region):
     print(f"\n--- Generating predictions for {target_date.strftime('%Y-%m-%d')} ---")
     
     # Identify features for which to calculate historical averages
-    autoregressive_lags = [f for f in features_list if 'MarketPriceProxy_lag' in f]
+    autoregressive_lags = [f for f in features_list if 'MarketPriceProxy_lag' in f] # Past values of the target variable used as predictors for the current value
     time_features = list(create_time_features(target_date).keys())
     covariate_features_to_average = [f for f in features_list if f not in time_features and f not in autoregressive_lags]
     
-    # Include the target variable for historical averaging, which is crucial for the new blending approach
+    # Include the target variable for historical averaging, which is crucial for the blending approach
     features_for_historical_averages = covariate_features_to_average + ['MarketPriceProxy']
 
     historical_averages = get_historical_averages(df_input.copy(), target_date, features_for_historical_averages)
@@ -275,32 +277,41 @@ def predict_and_recommend_charging(date_str, region):
     # Get the last known values from the historical data for the initial autoregressive lags
     last_known_data = df_input.iloc[-1].to_dict()
     
+    # current_autoregressive_lags is a dictionary containing lagged values of the target variable
     # Initialize autoregressive lag features for the first hour of the prediction
     current_autoregressive_lags = {
         'MarketPriceProxy_lag_1h': last_known_data.get('MarketPriceProxy'),
         'MarketPriceProxy_lag_6h': last_known_data.get('MarketPriceProxy_lag_6h'),
         'MarketPriceProxy_lag_24h': last_known_data.get('MarketPriceProxy_lag_24h'),
     }
+    ### More details on the logic: Use current lag to predict and then take the new prediction to update the lag dictionary.
+    ###                            Predict the next target value using current lag features, then update the lag dictionary by shifting previous predictions and inserting the new one as the most recent value
 
-    # Iterate through each hour of the day (0 to 23)
+    # Lag 1h captures immediate short-term momentum or recent fluctuations.
+    # Lag 6h reflects medium-term trends or intra-day cycles (e.g., morning vs. afternoon).
+    # Lag 24h captures daily seasonality by referencing the same hour on the previous day.
+
+
+    # Iterate through each hour of the day (0 to 23) for the hourly prediction
     initial_predictions_list = []
     for hour in range(24):
         current_datetime = target_date + timedelta(hours=hour)
         
+        # feature_vector is a dictionary  built to represent all the input features for the model at a specific hour
         # Build the feature vector for the current hour
         feature_vector = {}
-        feature_vector.update(create_time_features(current_datetime))
+        feature_vector.update(create_time_features(current_datetime))  # Update feature_vector for the given hour for the time features
         
         if not historical_averages.empty:
             hourly_avg_row = historical_averages.loc[hour]
-            feature_vector.update(hourly_avg_row[covariate_features_to_average].to_dict())
+            feature_vector.update(hourly_avg_row[covariate_features_to_average].to_dict())   # Update feature_vector for the given hour for the covariates to average features
         else:
             for feature in covariate_features_to_average:
                 feature_vector[feature] = 0
 
-        feature_vector.update(current_autoregressive_lags)
+        feature_vector.update(current_autoregressive_lags)  # Update feature_vector for the given hour for the autoregressive lags (i.e. target lag)
         
-        feature_df = pd.DataFrame([feature_vector], columns=features_list)
+        feature_df = pd.DataFrame([feature_vector], columns=features_list) # Create a one-row DataFrame from a feature vector (assigning column names from features_list) to prepare it for model prediction
         
         try:
             predicted_price = model.predict(feature_df)[0]
@@ -308,24 +319,21 @@ def predict_and_recommend_charging(date_str, region):
             print(f"Prediction failed for hour {hour}: {e}")
             predicted_price = np.nan
         
-        # Store initial prediction and update lags for the next hour
+        # Store initial prediction and update autoregressive (using last prediction for the new lag_1h) lags for the next hour
         initial_predictions_list.append(predicted_price)
         current_autoregressive_lags['MarketPriceProxy_lag_24h'] = current_autoregressive_lags['MarketPriceProxy_lag_6h']
         current_autoregressive_lags['MarketPriceProxy_lag_6h'] = current_autoregressive_lags['MarketPriceProxy_lag_1h']
-        current_autoregressive_lags['MarketPriceProxy_lag_1h'] = predicted_price
+        current_autoregressive_lags['MarketPriceProxy_lag_1h'] = predicted_price  # Last prediction becomes the new lag_1h for the next loop iteration (i.e. prediction for the next hour)
     
     # --- Blending Logic ---
     print("\n--- Blending Model Prediction with Historical Price Profile for Variance ---")
     
     # Motivation for Blending:
-    # This approach is a strategic compromise for the MVP. The initial predictions, based on historical
-    # averages for future features, often lack the natural daily variance needed for meaningful
-    # recommendations (e.g., distinguishing between cheap and expensive hours).
+    # This approach is a strategic compromise for the current status of the project. The initial predictions, based on historical
+    # averages for future features, often lack the natural daily variance needed for meaningful recommendations (e.g., distinguishing between cheap and expensive hours).
     #
-    # By blending the model's overall predicted price level with the typical hourly shape
-    # from historical data, we create a more realistic and actionable price curve. This
-    # provides a much better user experience while we await the implementation of
-    # a more advanced system that uses real-time API data for weather and Elia load forecasts.
+    # By blending the model's overall predicted price level with the typical hourly shape from historical data, we create a more realistic and actionable price curve. 
+    # This provides a much better user experience while we await the implementation of a more advanced system that uses real-time API data for weather and Elia load forecasts.
     # Future versions will replace this blending method with a live-data-driven approach.
     
     # Convert initial predictions to a DataFrame
@@ -349,9 +357,6 @@ def predict_and_recommend_charging(date_str, region):
         # Create the blended price curve: predicted average + historical shape
         # This preserves the model's overall price level while adding the hourly variance of history
         df_predictions['blended_price'] = predicted_daily_average + historical_diff
-        
-        # Use a reasonable minimum for prices to avoid negative values
-        df_predictions['blended_price'] = df_predictions['blended_price'].clip(lower=0)
         
         print("Blending successful. Recommendations will be based on the blended price curve.")
         final_price_column = 'blended_price'
@@ -522,7 +527,7 @@ def generate_charging_recommendation_plot(df_predictions, price_column, date_str
                 'x': 0.5,
                 'xanchor': 'center'
             },
-            xaxis_title="", # X-axis title is now blank
+            xaxis_title="", # X-axis title is set blank as title is self-sufficient for understanding
             xaxis_title_font=dict(size=18, family='Arial Black'),
             xaxis_tickfont=dict(size=18, family='Arial Black'),
             xaxis={'tickmode': 'linear', 'dtick': 1, 'range': [-0.5, 23.5], 'title_standoff': 10},
@@ -560,13 +565,11 @@ def main():
         print("\n--- Final Recommendation Summary ---")
         print(recs)
         
-        # Now, call the plotting function with the returned data
+        # Call the plotting function with the returned data
         plot = generate_charging_recommendation_plot(recs['df_predictions'], recs['final_price_column'], target_date_str)
         
         if plot:
             print("\n--- Plotly Figure Data (Local Only) ---")
-            # The .show() method opens a new browser window/tab to display the plot.
-            # This is intended for local execution where a browser is available.
             plot.show()
         else:
             print("\n--- Plotly Figure Data ---")

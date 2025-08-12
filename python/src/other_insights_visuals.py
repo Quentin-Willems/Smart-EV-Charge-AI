@@ -1,14 +1,13 @@
 # insights_visuals.py
 # Author: Quentin Willems
 # Project: Smart EV Charge recommendations leveraging AI and Elia open data
-# Purpose: Create historical insight visuals for the web app.
+# Purpose: Create other historical insights for exploration (not used in the final web app)
 # Dependencies:
 #     - data_processing.py
+#     - config.ini for configuration variables/paths
 
 import pandas as pd
-import numpy as np
 import plotly.graph_objects as go
-import plotly.express as px
 from datetime import datetime
 
 # Assuming data_processing.py is available in the same context
@@ -54,7 +53,7 @@ def _prepare_data_for_plots(df, date_string, user_province):
     pv_wallonia_provinces = ['hainaut', 'liège', 'luxembourg', 'namur', 'walloonbrabant']
     pv_brussels_provinces = ['brussels']
     
-    # --- UPDATED: Logic for determining the wind region based on the new data_processing.py output ---
+    # Logic for determining the wind region based on the data_processing.py output ---
     user_region_wind_col = ''
     if user_province in pv_flanders_provinces or user_province in pv_brussels_provinces:
         # Brussels is now handled by the Flanders wind data as federal data is not available
@@ -70,7 +69,7 @@ def _prepare_data_for_plots(df, date_string, user_province):
     
     if user_pv_col_name not in df_filtered.columns:
         print(f"PV data for province '{user_province}' not found in the DataFrame.")
-        return None, None, None, None, None, None
+        return None, None, None, None, None, None # 6 outputs expected from the _prepare_data_for_plots function
     
     return df_filtered, target_calendar_week, target_weekday_name, user_province, user_pv_col_name, user_region_wind_col
 
@@ -88,8 +87,7 @@ def generate_renewable_energy_plot(df, date_string, user_province):
         plotly.graph_objects.Figure: The generated Plotly figure.
     """
     try:
-        df_filtered, target_calendar_week, target_weekday_name, user_province, user_pv_col_name, user_region_wind_col = \
-            _prepare_data_for_plots(df.copy(), date_string, user_province)
+        df_filtered, target_calendar_week, target_weekday_name, user_province, user_pv_col_name, user_region_wind_col = _prepare_data_for_plots(df.copy(), date_string, user_province)
 
         if df_filtered is None:
             return None
@@ -97,8 +95,8 @@ def generate_renewable_energy_plot(df, date_string, user_province):
         print("Generating Historical Renewable Energy Profile plot with Plotly...")
         
         # Calculate the total renewable utilization
-        pv_series = df_filtered.get(user_pv_col_name, 0)
-        wind_series = df_filtered.get(user_region_wind_col, 0) if user_region_wind_col else 0
+        pv_series = df_filtered.get(user_pv_col_name, 0) 
+        wind_series = df_filtered.get(user_region_wind_col, 0)
         df_filtered['total_renewable_utilization'] = pv_series + wind_series
         
         # Aggregate to get the mean and standard deviation for each hour
@@ -107,10 +105,10 @@ def generate_renewable_energy_plot(df, date_string, user_province):
             std_utilization=('total_renewable_utilization', 'std')
         ).reset_index()
 
-        # Create a Plotly Figure object
+        # Create a Plotly Figure object (blank canvas to hold all visual elements)
         fig = go.Figure()
 
-        # Add the line plot for the mean utilization with a modern, clean color
+        # Add the line plot for the mean utilization
         fig.add_trace(go.Scatter(
             x=df_total_renewable['hour'],
             y=df_total_renewable['mean_utilization'],
@@ -118,10 +116,10 @@ def generate_renewable_energy_plot(df, date_string, user_province):
             name=f'Average Renewable Generation (Wind and Solar - {user_province.capitalize()})',
             marker=dict(color='#2ECC71', size=8),  # A vibrant green
             line=dict(color='#27AE60', width=3),  # A slightly darker green for the line
-            hovertemplate='Hour: %{x}<br>Avg. Rate: %{y:.2f}<extra></extra>' # Rounding hover text
+            hovertemplate='Hour: %{x}<br>Avg. Rate: %{y:.2f}<extra></extra>' # Tooltip that appears when you hover over a point (utilization rate rounded to 2 decimals)
         ))
 
-        # Add the shaded area for the standard deviation with a subtle, modern fill
+        # Add the shaded area for the standard deviation
         fig.add_trace(go.Scatter(
             x=df_total_renewable['hour'],
             y=df_total_renewable['mean_utilization'] + df_total_renewable['std_utilization'],
@@ -141,31 +139,31 @@ def generate_renewable_energy_plot(df, date_string, user_province):
             hovertemplate='<extra></extra>'
         ))
         
-        # Update layout for title and axis labels, with increased font size
+        # Update layout for title and axis labels
         fig.update_layout(
             title={
                 'text': f'<b>Historical Renewable Energy Generation Rate (Wind and Solar - similar days in {user_province.capitalize()})</b>',
-                'font': dict(size=18, family='Arial', color='#333'), # Increased font size
+                'font': dict(size=18, family='Arial', color='#333'),
                 'x': 0.5,
                 'xanchor': 'center'
             },
-            xaxis_title_font=dict(size=14), # Increased font size
-            yaxis_title_font=dict(size=14), # Increased font size
-            xaxis_tickfont=dict(size=12), # Increased font size
-            yaxis_tickfont=dict(size=12), # Increased font size
+            xaxis_title_font=dict(size=14), 
+            yaxis_title_font=dict(size=14), 
+            xaxis_tickfont=dict(size=12), 
+            yaxis_tickfont=dict(size=12), 
             xaxis={'tickmode': 'linear', 'dtick': 1},
             template='plotly_white'
         )
         # Round the y-axis ticks to two decimal places
         fig.update_yaxes(tickformat=".2f")
 
-        # Add the note at the bottom as an annotation, with increased font size
+        # Add the note at the bottom as an annotation
         fig.add_annotation(
             text="Note: The Generation Rate is the ratio between the measured Wind & Solar energy generation and the respective estimated total capacity.",
             xref="paper", yref="paper",
             x=0.05, y=-0.2,
             showarrow=False,
-            font=dict(size=12, color='gray'), # Increased font size
+            font=dict(size=12, color='gray'), 
             align="left"
         )
         
@@ -188,8 +186,7 @@ def generate_electricity_price_plot(df, date_string, user_province):
         plotly.graph_objects.Figure: The generated Plotly figure.
     """
     try:
-        df_filtered, target_calendar_week, target_weekday_name, user_province, _, _ = \
-            _prepare_data_for_plots(df.copy(), date_string, user_province)
+        df_filtered, target_calendar_week, target_weekday_name, user_province, _, _ = _prepare_data_for_plots(df.copy(), date_string, user_province)
 
         if df_filtered is None:
             return None
@@ -258,7 +255,7 @@ def generate_electricity_price_plot(df, date_string, user_province):
         fig.add_trace(go.Scatter(x=[None], y=[None], mode='markers', marker=dict(size=14, color='#F39C12'), name='Moderate Price Hours'))
         fig.add_trace(go.Scatter(x=[None], y=[None], mode='markers', marker=dict(size=14, color='#E74C3C'), name='Avoid Charging Hours'))
         
-        # Update layout for a cleaner look, with increased font size and centered legend
+        # Update layout for a cleaner look with increased font size and centered legend
         fig.update_layout(
             title={
                 'text': f'<b>Electricity Price (€/MWh) by Hour</b>',
@@ -306,7 +303,6 @@ def generate_electricity_price_plot(df, date_string, user_province):
         return None
 
 if __name__ == "__main__":
-    # --- UPDATED: The new execution block now loads and processes the data directly ---
     # First, load the raw data from PostgreSQL
     df_raw = load_data_from_postgres()
 
@@ -315,7 +311,7 @@ if __name__ == "__main__":
         df_processed = engineer_features(df_raw)
 
         if df_processed is not None:
-            # Use the processed DataFrame to generate sample plots to check code.
+            # Use the processed DataFrame to generate sample plots to check code and data exploration
             date_to_plot = '15-09-2025'
             province_to_plot = 'Namur'
 

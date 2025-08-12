@@ -2,6 +2,11 @@
 # Author: Quentin Willems
 # Project: Smart EV Charge recommendations leveraging AI and Elia open data
 # Purpose: A Streamlit web application to visualize historical EV charge insights and provide charging recommendations.
+# Dependencies:
+#     - data_processing.py (for generation of processed_data.parquet)
+#     - model_builder.py (for generation of stored model in ev_charge_model.joblib)
+#     - prediction_service.py (for core logic of prediction and recommendations plot)
+#     - config.ini for configuration variables/paths
 
 import streamlit as st
 import pandas as pd
@@ -9,9 +14,7 @@ from datetime import date
 import os
 import configparser
 
-# Import the core logic from the existing scripts.
-# The plotting function is now part of the prediction service,
-# so we remove the import from insights_visuals and get it from here.
+# Import the core logic from the existing scripts. The plotting function is now part of the prediction_service.py
 from prediction_service import predict_and_recommend_charging, generate_charging_recommendation_plot
 
 ###################################
@@ -87,12 +90,26 @@ def get_processed_data():
 # --- 3. User Input Widgets in Sidebar ---
 with st.sidebar:
     st.header("Settings")
-    # Define the list of provinces for the dropdown
-    provinces = [
-        'antwerp', 'eastflanders', 'flemishbrabant', 'hainaut', 'limburg', 'liège', 
-        'luxembourg', 'namur', 'walloonbrabant', 'westflanders', 'brussels'
-    ]
 
+    # The mapping from internal code to display name (Dutch/French)
+    province_map = {
+        'antwerp': 'Antwerpen',
+        'eastflanders': 'Oost-Vlaanderen',
+        'flemishbrabant': 'Vlaams-Brabant',
+        'limburg': 'Limburg',
+        'westflanders': 'West-Vlaanderen',
+        'hainaut': 'Hainaut',
+        'liège': 'Liège',
+        'luxembourg': 'Luxembourg',
+        'namur': 'Namur',
+        'walloonbrabant': 'Brabant Wallon',
+        'brussels': 'Brussel / Bruxelles',
+    }
+    
+    # Create the sorted list of display names for the selectbox
+    display_provinces = list(province_map.values())
+    display_provinces.sort()
+    
     # Create a date picker.
     selected_date = st.date_input(
         "Select a date for analysis:",
@@ -101,33 +118,35 @@ with st.sidebar:
         help="Select the current day or a future day."
     )
 
-    # Create a dropdown list for provinces.
-    selected_province = st.selectbox(
+    # Create a dropdown list for provinces using the display names
+    selected_display_province = st.selectbox(
         "Select your province:",
-        options=[p.capitalize() for p in provinces],
+        options=display_provinces,
         help="Photovoltaic and wind production vary across provinces."
     )
     
     st.markdown("""---""")
     
-    # This button is in the sidebar, but its action affects the main page
+    # This button is in the sidebar but its action affects the main page
     generate_button = st.button("Generate Insights", type="primary")
 
 # --- 4. Prediction, Plot Generation and Display (on the main page) ---
 if generate_button:
+    # We need to map the selected display name back to the internal key for the prediction service.
+    # This is done by creating a reverse lookup from the original map.
+    reverse_province_map = {v: k for k, v in province_map.items()}
+    selected_province_key = reverse_province_map.get(selected_display_province)
+
     # Format date for the prediction service (YYYY-MM-DD)
     prediction_date_str = selected_date.strftime('%Y-%m-%d')
     # Format date for the visuals (DD-MM-YYYY)
     visuals_date_str = selected_date.strftime('%d-%m-%Y')
     
-    province_lower = selected_province.lower()
-    
-    st.subheader(f"Insights and Recommendations for {selected_province} on {visuals_date_str}")
+    st.subheader(f"Insights and Recommendations for {selected_display_province} on {visuals_date_str}")
     
     with st.spinner("Generating recommendations and plots..."):
         # Get the recommendation from the prediction service
-        # The function now returns a DataFrame and column name for plotting
-        _, recommendations = predict_and_recommend_charging(prediction_date_str, province_lower)
+        _, recommendations = predict_and_recommend_charging(prediction_date_str, selected_province_key)
 
         # Check if recommendations were successfully generated
         if recommendations and recommendations['cheapest_hours']:
@@ -163,8 +182,6 @@ if generate_button:
 
         if recommendations:
             # Generate and display the Charging Recommendation Plot.
-            # We now use the dataframe and column name from the `recommendations` dictionary,
-            # and the formatted date string.
             charging_rec_fig = generate_charging_recommendation_plot(
                 recommendations['df_predictions'], 
                 recommendations['final_price_column'], 
@@ -172,7 +189,6 @@ if generate_button:
             )
 
             if charging_rec_fig:
-                # The plot is now displayed in the main content area, without columns
                 st.plotly_chart(charging_rec_fig, use_container_width=True)
             else:
                 st.warning("Could not generate the Charging Recommendation plot. Please check the data and scripts.")

@@ -1,14 +1,17 @@
 # data_processing.py
 # Author: Quentin Willems
 # Project: Smart EV Charge recommendations leveraging AI and Elia open data
-# Purpose: Centralized module for data loading, feature engineering, and file caching.
+# Purpose: Centralized module for data loading, feature engineering and persistent file caching (for the web app).
+# Dependencies:
+#     - Available data in external PostgreSQL data base (data wrangling handeled in postgres_data_wrangler.sql)
+#     - config.ini for configuration variables/paths
 
 import psycopg2
 import pandas as pd
 import numpy as np
 from psycopg2 import Error
 import configparser
-import os # Import the 'os' module to handle file paths
+import os # Import to handle file paths
 
 ###################################
 ### 0. Configuration Variables ###
@@ -17,12 +20,12 @@ import os # Import the 'os' module to handle file paths
 def load_config(config_file='config.ini'):
     """
     Loads configuration settings from a specified INI file.
-    Assumes the config file is in the same directory as the script.
+    Assumes the config file is in the same directory as this script.
     
     Returns:
         configparser.ConfigParser: The loaded configuration object (with database parameters as one of its items)
     """
-    # Get the absolute path to the directory where the script is located
+    # Get the absolute path to the directory where this script is located
     script_dir = os.path.dirname(os.path.abspath(__file__))
     # Construct the absolute path to the config file
     config_path = os.path.join(script_dir, config_file)
@@ -41,10 +44,10 @@ def load_config(config_file='config.ini'):
 def load_data_from_postgres():
     """
     Connects to the PostgreSQL database using parameters from config.ini,
-    loads the master data, and performs initial data cleaning.
+    loads the master data and performs initial data cleaning.
 
     Returns:
-        pd.DataFrame: The loaded and pre-processed DataFrame, or None if an error occurs.
+        pd.DataFrame: The loaded and pre-processed DataFrame (or None if an error occurs).
     """
     connection = None
     df_input = pd.DataFrame()
@@ -70,7 +73,7 @@ def load_data_from_postgres():
         print(df_input.info())
         print("\nFirst 5 rows:")
         print(df_input.head())
-        print(f"\nDataFrame shape: {df_input.shape}")
+        print(f"\nDataFrame number of rows and columns: {df_input.shape}")
 
         # Check for missing values
         print("\nMissing values per column:")
@@ -117,7 +120,7 @@ def engineer_features(df):
             return df_imputed
         print("Columns with missing values identified:", columns_with_na)
         for col in columns_with_na:
-            print(f"   > Imputing missing values in '{col}'...")
+            print(f"  > Imputing missing values in '{col}'...")
             grouped_means = df_imputed.groupby(group_cols)[col].transform('mean')
             df_imputed[col] = df_imputed[col].fillna(grouped_means)
         return df_imputed
@@ -142,12 +145,11 @@ def engineer_features(df):
     # 2.3 Photovoltaic (PV) production
     # Drop unnecessary aggregated views
     aggregated_regions = ['belgium', 'flanders', 'wallonia']
-    cols_to_drop = [f'area_{region}_pv_production' for region in aggregated_regions] + \
-        [f'area_{region}_pv_capacity' for region in aggregated_regions]
+    cols_to_drop = [f'area_{region}_pv_production' for region in aggregated_regions] + [f'area_{region}_pv_capacity' for region in aggregated_regions]
     df_engineered.drop(columns=cols_to_drop, inplace=True, errors='ignore')
     print(f"Dropped aggregated PV columns: {cols_to_drop}")
 
-    # Normalize PV production
+    # Normalize PV production by calculating utilization rate (i.e ratio between observed production and measured capacity on average for a given hour)
     provinces = ['antwerp', 'eastflanders', 'flemishbrabant', 'hainaut', 'limburg', 'liège', 'luxembourg', 'namur', 'walloonbrabant', 'westflanders', 'brussels']
     cols_to_drop_pv = []
     for p in provinces:
@@ -170,12 +172,11 @@ def engineer_features(df):
     # 2.4 Wind production
     # Drop unnecessary aggregated views
     wind_federal = ['federal']
-    agg_cols_to_drop_wind = [f'area_{region}_pv_production' for region in wind_federal] + \
-        [f'area_{region}_pv_capacity' for region in wind_federal]
+    agg_cols_to_drop_wind = [f'area_{region}_pv_production' for region in wind_federal] + [f'area_{region}_pv_capacity' for region in wind_federal]
     df_engineered.drop(columns=agg_cols_to_drop_wind, inplace=True, errors='ignore')
     print(f"Dropped aggregated PV columns: {agg_cols_to_drop_wind}")
     
-    # Normalize wind production
+    # Normalize wind production by calculating utilization rate (i.e ratio between observed production and measured capacity on average for a given hour)
     wind_regions = ['flanders', 'wallonia']
     cols_to_drop_wind = []
     for r in wind_regions:
@@ -194,7 +195,7 @@ def engineer_features(df):
             df_engineered[f'{col}_lag_{lag}h'] = df_engineered[col].shift(periods=lag)
     print("Successfully created lagged features for wind utilization rates.")
 
-    # 2.5 Time Series features
+    # 2.5 Time Series features (cyclical and weekend features)
     df_engineered['hour'] = pd.to_numeric(df_engineered['hour'], errors='coerce').astype('Int64')
     df_engineered['weekday'] = pd.to_numeric(df_engineered['weekday'], errors='coerce').astype('Int64')
     df_engineered['calendar_week'] = pd.to_numeric(df_engineered['calendar_week'], errors='coerce').astype('Int64')
@@ -205,6 +206,15 @@ def engineer_features(df):
     df_engineered['is_weekend'] = ((df_engineered['weekday'] == 5) | (df_engineered['weekday'] == 6)).astype(int)
     print("Created cyclical and weekend features.")
     
+     # 2.6 Create lagged features for MarketPriceProxy
+    lag_periods = [1, 6, 24]
+    for lag in lag_periods:
+        df_engineered[f'MarketPriceProxy_lag_{lag}h'] = df_engineered['MarketPriceProxy'].shift(periods=lag)
+    print("Successfully created lagged features for MarketPriceProxy.")
+    # Lag 1h captures immediate short-term momentum or recent fluctuations.
+    # Lag 6h reflects medium-term trends or intra-day cycles (e.g., morning vs. afternoon).
+    # Lag 24h captures daily seasonality by referencing the same hour on the previous day.
+
     return df_engineered
 
 if __name__ == '__main__':
@@ -216,7 +226,7 @@ if __name__ == '__main__':
             print("\nData processing complete. Final dataframe preview:")
             print(df_processed.head())
 
-            # --- NEW: Save the processed DataFrame to a file for persistent caching ---
+            # --- Save the processed DataFrame to a file for persistent caching ---
             try:
                 # Load the path from the config file
                 config = load_config()
