@@ -46,10 +46,12 @@ st.set_page_config(
     layout="wide"
 )
 
-st.title("⚡ Smart Electric Vehicle Charge Insights")
-st.markdown("Explore AI augmented recommendations for the best times to charge your EV.")
-st.markdown("The recommended charging hours are based on the predicted fluctuations in the day-ahead electricity spot market price.")
-st.markdown("""---""")
+st.title("⚡ Optimal Electric Vehicle Charging Times")
+st.markdown("""
+Select your day and province from the left dropdown menu, then click **Generate Insights** for AI-driven EV charging recommendations based on predicted day-ahead electricity prices.  
+Data provided by ELIA under the [Creative Commons Attribution 4.0 International License (CC BY 4.0)](https://creativecommons.org/licenses/by/4.0). For the best plot visibility, use a computer browser.
+""")
+st.markdown("---")
 
 # --- 2. Caching Data for Performance ---
 # This function is now responsible for loading the pre-computed data file.
