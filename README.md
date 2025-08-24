@@ -1,107 +1,168 @@
-Smart EV Charge Insights
+# ⚡ Smart Eelectric Vehicle (EV) Charge Insights
 
-Summary
-Smart EV Charge Insights is an AI-powered Streamlit web application that helps electric vehicle (EV) owners optimize charging times to minimize costs. It predicts day-ahead electricity spot market price fluctuations using historical data from ELIA (Belgium's electricity transmission system operator) and recommends the best hours to charge based on these forecasts. The app supports province-specific recommendations for all Belgian regions and visualizes results with interactive plots. You can check out a live demo of the app at https://smart-ev-charge-ai.streamlit.app/.
+## 🧾 Summary
 
-Key Features
-AI-Driven Predictions: Trains and selects the best model from a set of machine learning algorithms (Random Forest, XGBoost, AutoARIMA, or TCN) to forecast hourly electricity prices. The best model is selected based on performance metrics such as Mean Absolute Error (MAE) and Root Mean Squared Error (RMSE).
+**Smart EV Charge Insights** is an AI-powered Streamlit web application that helps EV owners optimize charging times to minimize costs. It predicts day-ahead electricity spot market price fluctuations using historical data from **ELIA** (Belgium's electricity transmission system operator) and recommends the best hours to charge based on these forecasts.
 
-Custom Recommendations: Users select a date and province to get tailored charging advice, including the top 4 cheapest hours and contextual insights (e.g., solar/wind influences).
+The app supports **province-specific recommendations** for all Belgian regions and visualizes results with interactive plots.
 
-Interactive Visualization: Displays a color-coded hourly recommendation plot (green for optimal, amber for moderate, red to avoid).
+🔗 **Live Demo**: [smart-ev-charge-ai.streamlit.app](https://smart-ev-charge-ai.streamlit.app/)
 
-Data Processing Pipeline: Includes SQL-based data ingestion and transformation in PostgreSQL, feature engineering (e.g., lagged variables, cyclical time features), and model training.
+---
 
-Deployment: Live demo available at https://smart-ev-charge-ai.streamlit.app/.
+## 🚀 Key Features
 
-Data Source: Utilizes four open datasets from ELIA Open Data Portal under the Creative Commons Attribution 4.0 International License (CC BY 4.0).
+- **AI-Driven Predictions**  
+  Trains and selects the best model from a set of machine learning algorithms (Random Forest, XGBoost, AutoARIMA, or TCN) to forecast hourly electricity prices. Model selection is based on performance metrics like MAE and RMSE.
 
-Motivations
-This project aims to empower EV owners in Belgium to make data-informed decisions amid fluctuating energy prices and growing renewable integration. By leveraging open data and AI, it promotes cost savings, grid efficiency, and sustainable energy use. It also demonstrates a full-stack data pipeline from raw open data ingestion to a user-friendly web app, encouraging open-source contributions in energy analytics.
+- **Custom Recommendations**  
+  Users select a date and province to get tailored charging advice, including the top 4 cheapest hours and contextual insights (e.g., solar/wind influences).
 
-Project Architecture
-The project is structured into modular components to handle the full data and application pipeline.
+- **Interactive Visualization**  
+  Displays a color-coded hourly recommendation plot:  
+  🟩 Green = optimal hours  
+  🟨 Amber = moderate  
+  🟥 Red = avoid
 
-config.ini: Configuration for paths and database credentials.
+- **Data Processing Pipeline**  
+  Includes SQL-based ingestion and transformation in PostgreSQL, feature engineering (lagged variables, cyclical time features), and model training.
 
-config.ini.example: An example file showing the required configuration settings.
+- **Deployment**  
+  Live demo available via Streamlit Cloud.
 
-data_processing.py: Loads data from PostgreSQL, performs feature engineering, and caches processed data as a Parquet file.
+- **Data Source**  
+  Uses four open datasets from the [ELIA Open Data Portal](https://www.elia.be/en/open-data) under the [CC BY 4.0 License](https://creativecommons.org/licenses/by/4.0/).
 
-model_builder.py: Trains multiple models, evaluates their performance, and saves the best one.
+---
 
-prediction_service.py: Generates predictions, recommendations, and Plotly visualizations.
+## 🎯 Motivations
 
-streamlit_app.py: The Streamlit web app interface.
+This project empowers EV owners in Belgium to make **data-informed decisions** amid fluctuating energy prices and growing renewable integration. By leveraging open data and AI, it promotes:
 
-postgres_data_wrangler.sql: A SQL script for cleaning and joining raw ELIA datasets in PostgreSQL.
+- Cost savings  
+- Grid efficiency  
+- Sustainable energy use  
 
-requirements.txt: Python dependencies.
+It also demonstrates a **full-stack data pipeline** from raw open data ingestion to a user-friendly web app, encouraging open-source contributions in energy analytics.
 
-Reproducibility and Setup
-The raw ELIA data is not included in this repository due to its size and licensing. Users must download it from the ELIA Open Data Portal and load it into a local PostgreSQL database.
+---
 
-Step 1: Download ELIA Datasets
-Go to the ELIA Open Data Portal.
+## 🏗️ Project Architecture
 
-Download the four historical datasets mentioned in the Summary (CSV format recommended).
+The project is modular and includes:
 
-Note: Comply with the CC BY 4.0 license by attributing ELIA in any reuse.
+- `config.ini`: Configuration for paths and DB credentials   
+- `postgres_data_wrangler.sql`: Cleans and joins raw ELIA datasets (create a master data for analytics)
+- `data_processing.py`: Centralized module for data loading (from PostgreSQL master data), feature engineering and persistent file caching (for the web app).
+- `model_builder.py`: Trains and selects the best model  
+- `prediction_service.py`: Generates predictions and visualizations  
+- `streamlit_app.py`: Streamlit web interface  
+- `requirements.txt`: Python dependencies
 
-Step 2: Set Up PostgreSQL Database
-Install PostgreSQL (e.g., via the official installer or Docker).
+---
 
+## 🔁 Reproducibility & Setup
+
+### Step 1: Download ELIA Datasets
+
+- Visit the [ELIA Open Data Portal](https://www.elia.be/en/open-data)
+- Download the following datasets (CSV format recommended):
+  - `imbalance_prices_per_quarter_hour`
+  - `measured_and_forecasted_total_load_on_the_belgian_grid`
+  - `pv_production_belgian_grid`
+  - `wind_power_production_estimation_and_forecast_on_belgian_grid`
+
+> ⚠️ Comply with the CC BY 4.0 license by attributing ELIA in any reuse.
+
+---
+
+### Step 2: Set Up PostgreSQL
+
+Install PostgreSQL locally or via Docker:
+
+```bash
 docker run -d -p 5432:5432 --name ev-db -e POSTGRES_PASSWORD=yourpassword postgres
+```
 
-Create a database: createdb EV_AI_DB (or use pgAdmin/psql).
+Create the database:
 
-Import the downloaded CSVs into tables using pgAdmin's import tool or the COPY command. Table names should match the script:
+```bash
+createdb EV_AI_DB
+```
 
-imbalance_prices_per_quarter_hour
+Import CSVs into tables (via pgAdmin or `COPY` command). Table names must match the SQL script.
 
-measured_and_forecasted_total_load_on_the_belgian_grid
+Update `config.ini`:
 
-pv_production_belgian_grid
-
-wind_power_production_estimation_and_forecast_on_belgian_grid
-
-Create and update config.ini with your DB credentials.
-
+```ini
 [database]
 host = localhost
 port = 5432
 database = EV_AI_DB
 user = postgres
 password = yourpassword
+```
 
-Run the SQL script: psql -d EV_AI_DB -f postgres_data_wrangler.sql. This cleans the data and creates the master_data table.
+Run the SQL script:
 
-Step 3: Install Dependencies
+```bash
+psql -d EV_AI_DB -f postgres_data_wrangler.sql
+```
+
+---
+
+### Step 3: Install Dependencies
+
+```bash
 git clone https://github.com/your-username/smart-ev-charge-insights.git
 cd smart-ev-charge-insights
 pip install -r requirements.txt
+```
 
-Step 4: Process Data and Train Model
+---
+
+### Step 4: Process Data & Train Model
+
+```bash
 python data_processing.py
 python model_builder.py
+```
 
-Step 5: Run the App Locally
+---
+
+### Step 5: Run the App Locally
+
+```bash
 streamlit run streamlit_app.py
+```
 
-Access the app at http://localhost:8501. Select a date and province, then click "Generate Insights".
+Visit [http://localhost:8501](http://localhost:8501) and generate insights by selecting a date and province.
 
-Step 6: Deploy (Optional)
-Deploy to Streamlit Cloud: Push to GitHub, connect via Streamlit Sharing, and ensure processed_data.parquet and ev_charge_model.joblib are included in your repository (or regenerate them in the cloud setup).
+---
 
-Notes
-Desktop Preferred: Plots are optimized for computer browsers; mobile may distort visuals.
+### Step 6: Deploy (Optional)
 
-Data Limitations: Predictions rely on historical patterns; real-time factors (e.g., weather events) may affect accuracy.
+- Push to GitHub
+- Connect via Streamlit Sharing
+- Ensure `processed_data.parquet` and `ev_charge_model.joblib` are included (or regenerate them in cloud setup)
 
-Contributing: Pull requests are welcome for improvements like additional models, real-time data integration, or enhanced visualizations. Open issues for bugs or features.
+---
 
-License
-This project is licensed under the MIT License - see the LICENSE.md file for details. Data usage must attribute ELIA per the CC BY 4.0 license.
+## 📌 Notes
 
-Contact
-For questions, open a GitHub Issue or email willems.quentin@gmail.com.
+- **Desktop Preferred**: Plots are optimized for desktop browsers  
+- **Data Limitations**: Predictions rely on historical patterns; real-time events may affect accuracy  
+- **Contributing**: Pull requests welcome! Add models, improve visuals, or integrate real-time data
+
+---
+
+## 📄 License
+
+This project is licensed under the **MIT License**.  
+Data usage must attribute ELIA per the **CC BY 4.0 License**.
+
+---
+
+## 📬 Contact
+
+For questions, feel free to contact me via email: **willems.quentin@gmail.com**
