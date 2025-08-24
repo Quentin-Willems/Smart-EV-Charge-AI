@@ -178,7 +178,7 @@ BEGIN
         TO_CHAR("Datetime"::timestamp, ''WW'')';
 
     -- Step 3 : Built final dynamic query
-    -- Note: WHERE claise filters the data to include only rows where the "Measured & Upscaled" column contains a value that is a valid number (integer or decimal, positive or negative) after removing any surrounding spaces. 
+    -- Note: WHERE clause filters the data to include only rows where the "Measured & Upscaled" column contains a value that is a valid number (integer or decimal, positive or negative) after removing any surrounding spaces. 
     --       This prevents errors when the next part of the query tries to cast the value to a numeric type.
     sql_query := format('
         DROP TABLE IF EXISTS wind_production_clean;
