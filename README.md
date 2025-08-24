@@ -1,4 +1,4 @@
-# ⚡ Smart Eelectric Vehicle (EV) Charge Insights
+# ⚡ Smart Electric Vehicle (EV) Charge Insights
 
 ## 🧾 Summary
 
