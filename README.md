@@ -13,7 +13,7 @@ The app supports **province-specific recommendations** for all Belgian regions a
 ## 🚀 Key Features
 
 - **AI-Driven Predictions**  
-  Trains and selects the best model from a set of machine learning algorithms (Random Forest, XGBoost, AutoARIMA, or TCN) to forecast hourly electricity prices. Model selection is based on performance metrics like MAE and RMSE.
+  Trains and selects the best model from a set of machine learning algorithms (Random Forest, XGBoost, ARIMA or TCN) to forecast hourly electricity prices. Model selection is based on performance metrics like MAE and RMSE.
 
 - **Custom Recommendations**  
   Users select a date and province to get tailored charging advice, including the top 4 cheapest hours and contextual insights (e.g., solar/wind influences).
